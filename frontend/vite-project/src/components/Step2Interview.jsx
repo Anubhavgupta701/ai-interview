@@ -15,6 +15,9 @@ function Step2Interview({ interviewData, onFinish }) {
     const isMicOnRef = useRef(true);
     useEffect(() => { isMicOnRef.current = isMicOn; }, [isMicOn]);
     const recognitionRef = useRef(null);
+    const [isListening, setIsListening] = useState(false);
+    const isListeningRef = useRef(false);
+    const [micError, setMicError] = useState('');
     const [isAiPlaying, setIsAiPlaying] = useState(false);
     // keep ref in sync so timer interval always reads the latest value
     useEffect(() => { isAiPlayingRef.current = isAiPlaying; }, [isAiPlaying]);
@@ -38,6 +41,22 @@ function Step2Interview({ interviewData, onFinish }) {
 
     const currentQuestion = questions[currentIndex];
     const totalQuestions = questions.length;
+
+    const requestMicPermission = async () => {
+        if (typeof window !== 'undefined' && navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+                stream.getTracks().forEach(track => track.stop());
+                setMicError('');
+                return true;
+            } catch (err) {
+                console.error("Microphone permission error:", err);
+                setMicError("Microphone access denied. Please click the lock icon in your browser address bar to allow microphone access.");
+                return false;
+            }
+        }
+        return true;
+    };
 
     useEffect(() => {
         const loadVoices = () => {
@@ -201,95 +220,130 @@ function Step2Interview({ interviewData, onFinish }) {
 
     // mic to text
     useEffect(() => {
-        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        if (!SpeechRecognition) return;
+        const SpeechRecognition = typeof window !== 'undefined' && (window.SpeechRecognition || window.webkitSpeechRecognition);
+        if (!SpeechRecognition) {
+            setMicError("Speech Recognition is not supported in this browser. Please use Google Chrome or Microsoft Edge.");
+            return;
+        }
 
         const recognition = new SpeechRecognition();
         recognition.continuous = true;
         recognition.interimResults = true;
         recognition.lang = "en-US";
 
-        recognition.onresult = (event) => {
-            let interimTranscript = '';
-            let finalTranscript = '';
+        recognition.onstart = () => {
+            isListeningRef.current = true;
+            setIsListening(true);
+            setMicError('');
+        };
 
-            for (let i = event.resultIndex; i < event.results.length; i++) {
+        recognition.onresult = (event) => {
+            let sessionFinal = '';
+            let sessionInterim = '';
+
+            for (let i = 0; i < event.results.length; i++) {
                 const transcript = event.results[i][0].transcript;
                 if (event.results[i].isFinal) {
-                    finalTranscript += transcript + ' ';
+                    sessionFinal += transcript + ' ';
                 } else {
-                    interimTranscript += transcript;
+                    sessionInterim += transcript;
                 }
             }
 
-            if (finalTranscript) {
-                const updatedBase = baseAnswerRef.current
-                    ? (baseAnswerRef.current.trim() + ' ' + finalTranscript.trim())
-                    : finalTranscript.trim();
-                baseAnswerRef.current = updatedBase;
-            }
+            const base = baseAnswerRef.current ? baseAnswerRef.current.trim() : '';
+            const sessionText = (sessionFinal + sessionInterim).trim();
 
-            const currentBase = baseAnswerRef.current ? baseAnswerRef.current.trim() : '';
-            const fullText = interimTranscript
-                ? (currentBase ? currentBase + ' ' + interimTranscript.trim() : interimTranscript.trim())
-                : currentBase;
+            const fullText = sessionText
+                ? (base ? `${base} ${sessionText}` : sessionText)
+                : base;
 
             setAnswer(fullText);
         };
 
         // Auto-restart on silence if mic is enabled and AI isn't speaking
         recognition.onend = () => {
+            isListeningRef.current = false;
+            setIsListening(false);
+
+            if (answerRef.current) {
+                baseAnswerRef.current = answerRef.current.trim();
+            }
+
             if (isMicOnRef.current && !isAiPlayingRef.current && recognitionRef.current) {
                 setTimeout(() => {
-                    try {
-                        if (isMicOnRef.current && !isAiPlayingRef.current && recognitionRef.current) {
+                    if (isMicOnRef.current && !isAiPlayingRef.current && recognitionRef.current && !isListeningRef.current) {
+                        try {
                             recognitionRef.current.start();
-                        }
-                    } catch (_) {}
-                }, 150);
+                            isListeningRef.current = true;
+                            setIsListening(true);
+                        } catch (_) {}
+                    }
+                }, 200);
             }
         };
 
         recognition.onerror = (e) => {
+            isListeningRef.current = false;
+            setIsListening(false);
             if (e.error === 'aborted' || e.error === 'no-speech') return;
-            console.error('Speech recognition error:', e.error);
+            if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
+                setMicError("Microphone permission denied. Please allow microphone access in your browser settings.");
+            } else if (e.error === 'network') {
+                setMicError("Speech recognition network error. Please check your internet connection.");
+            } else {
+                console.error('Speech recognition error:', e.error);
+            }
         };
 
         recognitionRef.current = recognition;
+
         if (isMicOnRef.current && !isAiPlayingRef.current) {
-            try { recognition.start(); } catch (_) {}
+            startMic();
         }
 
         return () => {
             if (recognitionRef.current) {
+                recognitionRef.current.onstart = null;
                 recognitionRef.current.onend = null;
                 recognitionRef.current.onerror = null;
                 recognitionRef.current.onresult = null;
                 try { recognitionRef.current.stop(); } catch (_) {}
                 recognitionRef.current = null;
             }
+            isListeningRef.current = false;
+            setIsListening(false);
         };
     }, []);
 
-    const startMic = () => {
-        if (!recognitionRef.current || isAiPlayingRef.current) return;
+    const startMic = async () => {
+        if (!recognitionRef.current || isAiPlayingRef.current || !isMicOnRef.current) return;
+        if (isListeningRef.current) return;
+
+        const hasPermission = await requestMicPermission();
+        if (!hasPermission || !isMicOnRef.current || isAiPlayingRef.current) return;
+
         try {
             recognitionRef.current.start();
+            isListeningRef.current = true;
+            setIsListening(true);
+            setMicError('');
         } catch (error) {
-            // Already started
+            if (error.name !== 'InvalidStateError') {
+                console.error('Error starting speech recognition:', error);
+            }
         }
     };
 
     const stopMic = () => {
-        if (!recognitionRef.current && !isAiPlaying) return;
+        if (!recognitionRef.current) return;
         try {
             recognitionRef.current.stop();
-        } catch (error) {
-            // Already stopped
-        }
+        } catch (_) {}
+        isListeningRef.current = false;
+        setIsListening(false);
     };
 
-    const toggleMic = () => {
+    const toggleMic = async () => {
         if (isMicOnRef.current) {
             setIsMicOn(false);
             isMicOnRef.current = false;
@@ -297,7 +351,8 @@ function Step2Interview({ interviewData, onFinish }) {
         } else {
             setIsMicOn(true);
             isMicOnRef.current = true;
-            startMic();
+            setMicError('');
+            await startMic();
         }
     };
 
@@ -435,6 +490,44 @@ function Step2Interview({ interviewData, onFinish }) {
                             {currentQuestion?.question || 'Loading question...'}
                         </div>
                     </div>
+
+                    {/* Answer Box Header with Mic Status */}
+                    <div className='flex items-center justify-between mb-2 px-1'>
+                        <span className='text-xs font-semibold text-gray-500 uppercase tracking-wider'>Your Answer</span>
+                        <div className='flex items-center gap-2'>
+                            {isListening ? (
+                                <span className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-semibold bg-red-100 text-red-700 animate-pulse'>
+                                    <span className='w-2 h-2 rounded-full bg-red-600 animate-ping'></span>
+                                    🎙️ Listening... Speak now
+                                </span>
+                            ) : isAiPlaying ? (
+                                <span className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800'>
+                                    🤖 AI Speaking... Mic paused
+                                </span>
+                            ) : isMicOn ? (
+                                <span className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-emerald-100 text-emerald-800'>
+                                    🎤 Mic Standby
+                                </span>
+                            ) : (
+                                <span className='inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium bg-gray-200 text-gray-700'>
+                                    🔇 Mic Muted
+                                </span>
+                            )}
+                        </div>
+                    </div>
+
+                    {micError && (
+                        <div className='mb-3 p-3 bg-red-50 border border-red-200 rounded-xl text-red-700 text-xs font-medium flex items-center justify-between shadow-sm'>
+                            <span>⚠️ {micError}</span>
+                            <button
+                                type="button"
+                                onClick={() => { setMicError(''); startMic(); }}
+                                className='ml-2 px-3 py-1 bg-red-600 hover:bg-red-700 text-white rounded-lg text-xs font-semibold transition cursor-pointer'
+                            >
+                                Grant / Retry Mic Access
+                            </button>
+                        </div>
+                    )}
 
                     {/* Answer Box */}
                     <textarea
