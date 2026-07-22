@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'motion/react';
 import axios from 'axios';
 import maleVideo from "../assets/videos/malevideo.mp4";
@@ -28,7 +28,8 @@ function Step2Interview({ interviewData, onFinish }) {
     const isListeningRef = useRef(false);
     const isAiPlayingRef = useRef(false);
     const recognitionRef = useRef(null);
-    const finalTranscriptRef = useRef('');
+    const finalTranscriptRef = useRef('');   // text confirmed across ALL sessions for this question
+    const sessionFinalRef = useRef('');       // text confirmed in the CURRENT session only
     const videoRef = useRef(null);
     const timerRef = useRef(null);
     const startTimeRef = useRef(Date.now());
@@ -151,7 +152,8 @@ function Step2Interview({ interviewData, onFinish }) {
         const limit = questions[currentIndex]?.timeLimit || 60;
         setTimeLeft(limit);
         setAnswer('');
-        finalTranscriptRef.current = '';
+        finalTranscriptRef.current = '';   // reset for new question
+        sessionFinalRef.current = '';      // reset session too
         setFeedback('');
         setAnswered(false);
 
@@ -177,49 +179,79 @@ function Step2Interview({ interviewData, onFinish }) {
         rec.continuous = true;
         rec.interimResults = true;
         rec.lang = 'en-US';
+        rec.maxAlternatives = 1;
 
         rec.onstart = () => {
+            // Reset per-session accumulator every time recognition starts fresh
+            sessionFinalRef.current = '';
             isListeningRef.current = true;
             setIsListening(true);
             setMicError('');
         };
 
         rec.onresult = (event) => {
-            let newFinals = '';
+            /*
+             * KEY INSIGHT:
+             * Every time rec.start() is called (new session), event.results resets.
+             * sessionFinalRef tracks finals for THIS session only.
+             * finalTranscriptRef holds text confirmed from ALL past sessions.
+             * Display = finalTranscriptRef + sessionFinalRef + current interim.
+             */
+            let sessionFinals = '';
             let interim = '';
-            for (let i = event.resultIndex; i < event.results.length; i++) {
+
+            // Rebuild the entire session's confirmed finals from scratch each call
+            // (safe because event.results only has this session's data)
+            for (let i = 0; i < event.results.length; i++) {
                 const t = event.results[i][0].transcript;
                 if (event.results[i].isFinal) {
-                    newFinals += t;
+                    sessionFinals += (sessionFinals ? ' ' : '') + t.trim();
                 } else {
-                    interim += t;
+                    // Only last non-final is the live interim
+                    interim = t;
                 }
             }
-            if (newFinals) {
-                finalTranscriptRef.current = (finalTranscriptRef.current + ' ' + newFinals).trim();
-            }
-            const display = interim
-                ? (finalTranscriptRef.current ? finalTranscriptRef.current + ' ' + interim : interim)
-                : finalTranscriptRef.current;
+
+            // Update session accumulator
+            sessionFinalRef.current = sessionFinals;
+
+            // Build display string: past sessions + this session finals + live interim
+            const pastText = finalTranscriptRef.current.trim();
+            const thisSessionText = sessionFinals.trim();
+            const confirmed = [pastText, thisSessionText].filter(Boolean).join(' ');
+            const display = interim.trim()
+                ? (confirmed ? confirmed + ' ' + interim.trim() : interim.trim())
+                : confirmed;
+
             setAnswer(display);
         };
 
         rec.onend = () => {
+            // When a session ends, commit session finals into the permanent store
+            if (sessionFinalRef.current.trim()) {
+                const pastText = finalTranscriptRef.current.trim();
+                finalTranscriptRef.current = [pastText, sessionFinalRef.current.trim()].filter(Boolean).join(' ');
+            }
+            sessionFinalRef.current = '';
             isListeningRef.current = false;
             setIsListening(false);
+
+            // Auto-restart for continuous listening
             if (isMicOnRef.current && !isAiPlayingRef.current) {
                 setTimeout(() => {
                     if (isMicOnRef.current && !isAiPlayingRef.current && !isListeningRef.current) {
                         try { rec.start(); } catch (_) {}
                     }
-                }, 250);
+                }, 300);
             }
         };
 
         rec.onerror = (e) => {
+            // no-speech: commit whatever we have and let onend handle restart
+            if (e.error === 'no-speech') return;
+            if (e.error === 'aborted') return;
             isListeningRef.current = false;
             setIsListening(false);
-            if (e.error === 'no-speech' || e.error === 'aborted') return;
             if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
                 setMicError('Microphone permission denied. Allow mic in your browser and click Retry.');
             } else if (e.error === 'network') {
@@ -231,9 +263,10 @@ function Step2Interview({ interviewData, onFinish }) {
 
         recognitionRef.current = rec;
 
+        // Delay start to avoid clashing with the AI intro speech
         const kickoff = setTimeout(() => {
             if (isMicOnRef.current && !isAiPlayingRef.current) startMic();
-        }, 600);
+        }, 800);
 
         return () => {
             clearTimeout(kickoff);
@@ -244,6 +277,7 @@ function Step2Interview({ interviewData, onFinish }) {
             try { rec.stop(); } catch (_) {}
             recognitionRef.current = null;
             isListeningRef.current = false;
+            sessionFinalRef.current = '';
             setIsListening(false);
         };
     // eslint-disable-next-line react-hooks/exhaustive-deps
