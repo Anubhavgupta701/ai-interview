@@ -30,6 +30,8 @@ function Step2Interview({ interviewData, onFinish }) {
     const recognitionRef = useRef(null);
     const finalTranscriptRef = useRef('');   // text confirmed across ALL sessions for this question
     const sessionFinalRef = useRef('');       // text confirmed in the CURRENT session only
+    const answerRef = useRef('');             // always mirrors answer state
+    const baseForSessionRef = useRef('');     // answer value at the time this session started
     const videoRef = useRef(null);
     const timerRef = useRef(null);
     const startTimeRef = useRef(Date.now());
@@ -67,10 +69,23 @@ function Step2Interview({ interviewData, onFinish }) {
     useEffect(() => {
         const load = () => {
             const voices = window.speechSynthesis?.getVoices() ?? [];
-            const male = voices.find(v => /david|mark|male|google us english/i.test(v.name));
-            const female = voices.find(v => /zira|sara|female|google uk english/i.test(v.name));
+            // Prefer explicitly male voices — do NOT include 'Google US English' (it's female)
+            const male = voices.find(v =>
+                /\bdavid\b/i.test(v.name) ||
+                /\bmark\b/i.test(v.name) ||
+                /microsoft.*male/i.test(v.name)
+            ) || voices.find(v =>
+                /\bmale\b/i.test(v.name)
+            ) || voices.find(v =>
+                // last resort: any English US voice that is NOT known-female
+                /en.*US/i.test(v.lang) &&
+                !/zira|sara|hazel|female|helen|victoria|female|karen|samantha|google us english/i.test(v.name)
+            );
+            const female = voices.find(v =>
+                /zira|sara|female|google uk english|hazel/i.test(v.name)
+            );
             const voice = {
-                male: male?.name || voices[0]?.name || null,
+                male: male?.name || null,
                 female: female?.name || voices[0]?.name || null,
             };
             setSelectedVoice(voice);
@@ -121,7 +136,10 @@ function Step2Interview({ interviewData, onFinish }) {
                 clearTimeout(tid);
                 if (videoRef.current) { videoRef.current.pause(); videoRef.current.currentTime = 0; }
                 startTimeRef.current = Date.now();
-                setTimeout(done, 100);
+                // Wait 1500ms before restarting mic so TTS audio fully clears
+                // from the microphone — prevents AI speech from being transcribed
+                // as the user's answer
+                setTimeout(done, 1500);
             };
             utterance.onerror = () => { clearTimeout(tid); done(); };
 
@@ -152,8 +170,10 @@ function Step2Interview({ interviewData, onFinish }) {
         const limit = questions[currentIndex]?.timeLimit || 60;
         setTimeLeft(limit);
         setAnswer('');
+        answerRef.current = '';
         finalTranscriptRef.current = '';   // reset for new question
         sessionFinalRef.current = '';      // reset session too
+        baseForSessionRef.current = '';    // reset session base
         setFeedback('');
         setAnswered(false);
 
@@ -182,7 +202,9 @@ function Step2Interview({ interviewData, onFinish }) {
         rec.maxAlternatives = 1;
 
         rec.onstart = () => {
-            // Reset per-session accumulator every time recognition starts fresh
+            // Snapshot the current confirmed answer as the base for this session.
+            // This ensures each session only ADDS new words on top of what's already there.
+            baseForSessionRef.current = answerRef.current.trim();
             sessionFinalRef.current = '';
             isListeningRef.current = true;
             setIsListening(true);
@@ -191,65 +213,53 @@ function Step2Interview({ interviewData, onFinish }) {
 
         rec.onresult = (event) => {
             /*
-             * KEY INSIGHT:
-             * Every time rec.start() is called (new session), event.results resets.
-             * sessionFinalRef tracks finals for THIS session only.
-             * finalTranscriptRef holds text confirmed from ALL past sessions.
-             * Display = finalTranscriptRef + sessionFinalRef + current interim.
+             * event.results resets each time rec.start() is called.
+             * Loop from i=0 to rebuild all finals for THIS session.
+             * baseForSessionRef holds the confirmed text from BEFORE this session.
+             * Display = base + sessionFinals + live interim
              */
             let sessionFinals = '';
             let interim = '';
 
-            // Rebuild the entire session's confirmed finals from scratch each call
-            // (safe because event.results only has this session's data)
             for (let i = 0; i < event.results.length; i++) {
                 const t = event.results[i][0].transcript;
                 if (event.results[i].isFinal) {
                     sessionFinals += (sessionFinals ? ' ' : '') + t.trim();
                 } else {
-                    // Only last non-final is the live interim
-                    interim = t;
+                    interim = t.trim();
                 }
             }
 
-            // Update session accumulator
             sessionFinalRef.current = sessionFinals;
 
-            // Build display string: past sessions + this session finals + live interim
-            const pastText = finalTranscriptRef.current.trim();
-            const thisSessionText = sessionFinals.trim();
-            const confirmed = [pastText, thisSessionText].filter(Boolean).join(' ');
-            const display = interim.trim()
-                ? (confirmed ? confirmed + ' ' + interim.trim() : interim.trim())
+            const base = baseForSessionRef.current;
+            const confirmed = [base, sessionFinals].filter(Boolean).join(' ');
+            const display = interim
+                ? (confirmed ? confirmed + ' ' + interim : interim)
                 : confirmed;
 
+            answerRef.current = display;
             setAnswer(display);
         };
 
         rec.onend = () => {
-            // When a session ends, commit session finals into the permanent store
-            if (sessionFinalRef.current.trim()) {
-                const pastText = finalTranscriptRef.current.trim();
-                finalTranscriptRef.current = [pastText, sessionFinalRef.current.trim()].filter(Boolean).join(' ');
-            }
-            sessionFinalRef.current = '';
             isListeningRef.current = false;
             setIsListening(false);
+            sessionFinalRef.current = '';
 
-            // Auto-restart for continuous listening
+            // Auto-restart — wait 800ms so residual audio from the room clears
             if (isMicOnRef.current && !isAiPlayingRef.current) {
                 setTimeout(() => {
                     if (isMicOnRef.current && !isAiPlayingRef.current && !isListeningRef.current) {
                         try { rec.start(); } catch (_) {}
                     }
-                }, 300);
+                }, 800);
             }
         };
 
         rec.onerror = (e) => {
-            // no-speech: commit whatever we have and let onend handle restart
-            if (e.error === 'no-speech') return;
-            if (e.error === 'aborted') return;
+            if (e.error === 'no-speech') return;   // normal — onend handles restart
+            if (e.error === 'aborted') return;      // we stopped it intentionally
             isListeningRef.current = false;
             setIsListening(false);
             if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
@@ -263,10 +273,10 @@ function Step2Interview({ interviewData, onFinish }) {
 
         recognitionRef.current = rec;
 
-        // Delay start to avoid clashing with the AI intro speech
+        // Delay initial start to avoid clashing with the AI intro TTS
         const kickoff = setTimeout(() => {
             if (isMicOnRef.current && !isAiPlayingRef.current) startMic();
-        }, 800);
+        }, 1000);
 
         return () => {
             clearTimeout(kickoff);
@@ -452,7 +462,9 @@ function Step2Interview({ interviewData, onFinish }) {
                         onChange={(e) => {
                             const v = e.target.value;
                             setAnswer(v);
-                            finalTranscriptRef.current = v;
+                            answerRef.current = v;
+                            baseForSessionRef.current = v; // keep base in sync with manual edits
+                            sessionFinalRef.current = '';  // manual edit invalidates session accumulation
                         }}
                         disabled={answered}
                         placeholder='Type or speak your answer here...'
