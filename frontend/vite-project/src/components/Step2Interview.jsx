@@ -155,8 +155,8 @@ function Step2Interview({ interviewData, onFinish }) {
                 utterance.voice = maleVoice;
             }
 
-            utterance.rate = 0.78; // Measured, steady, confident heavy pace
-            utterance.pitch = 0.5; // Deep, bass-heavy sigma masculine voice
+            utterance.rate = 0.72; // Slow, powerful, dominant pace
+            utterance.pitch = 0.1; // Absolute minimum pitch floor for deepest alpha male voice
             utterance.volume = 1;
 
             let settled = false;
