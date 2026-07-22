@@ -1,4 +1,4 @@
-﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
+import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'motion/react';
 import axios from 'axios';
 import maleVideo from "../assets/videos/malevideo.mp4";
@@ -99,22 +99,24 @@ function Step2Interview({ interviewData, onFinish }) {
         return `${e} ${a}`;
     };
 
-    // Dynamically find the best male voice
+    // Dynamically find the best deep adult male voice
     const getBestMaleVoice = () => {
         if (typeof window === 'undefined' || !window.speechSynthesis) return null;
         const voices = window.speechSynthesis.getVoices();
         if (!voices || voices.length === 0) return null;
 
-        const explicitMale = voices.find(v =>
-            /\b(david|mark|george|james|richard|guy|stefan|daniel|alex|fred|male)\b/i.test(v.name) ||
-            /microsoft.*(david|mark|george|male)/i.test(v.name) ||
-            /google.*male/i.test(v.name)
+        // Priority 1: Direct matches for prominent deep adult male voice models
+        const deepAdultMale = voices.find(v =>
+            /\b(david|mark|george|james|richard|guy|stefan|daniel|alex|fred|ryan|oliver|rishi|male)\b/i.test(v.name) ||
+            /microsoft.*(david|mark|george|ryan|male)/i.test(v.name) ||
+            /google.*(uk english male|us english male|male)/i.test(v.name)
         );
-        if (explicitMale) return explicitMale;
+        if (deepAdultMale) return deepAdultMale;
 
+        // Priority 2: Non-female English voices
         const nonFemaleEn = voices.find(v =>
             v.lang.startsWith('en') &&
-            !/zira|sara|hazel|helen|victoria|karen|samantha|catherine|lisa|eva|fiona|female|google us english/i.test(v.name)
+            !/zira|sara|hazel|helen|victoria|karen|samantha|catherine|lisa|eva|fiona|female|google us english$/i.test(v.name)
         );
         return nonFemaleEn || voices.find(v => !/zira|sara|hazel|female|samantha/i.test(v.name)) || voices[0];
     };
@@ -155,8 +157,8 @@ function Step2Interview({ interviewData, onFinish }) {
                 utterance.voice = maleVoice;
             }
 
-            utterance.rate = 0.9;
-            utterance.pitch = 0.7;
+            utterance.rate = 0.88;
+            utterance.pitch = 0.55; // Lower pitch for deep adult male voice profile
             utterance.volume = 1.0;
 
             let settled = false;
