@@ -16,10 +16,7 @@ const app=express();
 
 const allowedOrigins = [
     process.env.CORS_ORIGIN,
-    "http://localhost:5173",
-    "http://localhost:5174",
-    "http://localhost:5175",
-    "http://localhost:5176",
+   "https://rk-interviewer.onrender.com"
 ].filter(Boolean);
 
 app.use(cors({
