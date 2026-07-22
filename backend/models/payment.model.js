@@ -1,0 +1,27 @@
+import mongoose from "mongoose";
+const paymentSchema = new mongoose.Schema({
+    userId:{
+        type:mongoose.Schema.Types.ObjectId,
+        ref:"User",
+        required:true
+    },
+     planId: String,
+     amount:Number,
+     credits:Number,
+     razorpayOrderId:String,
+     razorpayPaymentId:String,
+     
+     status:{
+        type:String,
+        enum:["success","failed","pending"],
+        default:"pending"
+     },
+  
+     
+    
+},{timestamps:true})
+
+
+
+const Payment= mongoose.model("payment",paymentSchema);
+export default Payment
