@@ -49,6 +49,11 @@ app.use("/api/user",userRouter);
 app.use("/api/interview",interviewRouter)
 app.use("/api/payment" , paymentRouter)
 
+app.use((err, req, res, next) => {
+    console.error("Global Error Handler:", err);
+    res.status(err.status || 500).json({ message: err.message || "Internal Server Error" });
+});
+
 app.listen(PORT, () => {
     console.log(`Server running on port ${PORT}`);
 });

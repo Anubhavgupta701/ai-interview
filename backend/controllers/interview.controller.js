@@ -6,12 +6,11 @@ import Interview from "../models/interview.model.js";
 
 export const analyzeResume = async (req, res) => {
     try {
-        if (!req.file) {
+        if (!req.file || !req.file.buffer) {
             return res.status(400).json({ message: "Resume required" });
         }
-        const filePath = req.file.path;
-        const fileBuffer = await fs.promises.readFile(filePath);
-        const uint8Array = new Uint8Array(fileBuffer)
+        const fileBuffer = req.file.buffer;
+        const uint8Array = new Uint8Array(fileBuffer);
 
         let resumeText = "";
 
@@ -22,7 +21,7 @@ export const analyzeResume = async (req, res) => {
             const content = await page.getTextContent();
 
             const pageText = content.items.map(item => item.str).join(" ");
-            resumeText += pageText + "/n";
+            resumeText += pageText + "\n";
         }
         resumeText = resumeText.replace(/\s+/g, " ").trim();
 
@@ -56,30 +55,25 @@ export const analyzeResume = async (req, res) => {
         } else {
             const aiResponse = await askAi(messages);
             try {
-                parsed = JSON.parse(aiResponse);
+                const cleanedResponse = aiResponse.replace(/```json/gi, "").replace(/```/g, "").trim();
+                parsed = JSON.parse(cleanedResponse);
             } catch (err) {
                 console.error('Failed to parse AI response as JSON:', aiResponse);
                 throw new Error(`Invalid AI response format: ${err.message}`);
             }
         }
-        fs.unlinkSync(filePath);
 
         res.json({
-            role: parsed.role,
-            experience: parsed.experience,
-            projects: parsed.projects,
-            skills: parsed.skills,
+            role: parsed.role || "",
+            experience: parsed.experience || "",
+            projects: parsed.projects || [],
+            skills: parsed.skills || [],
             resumeText
         })
 
     } catch (error) {
-        console.error(error);
-        if (req.file && fs.existsSync(req.file.path)) {
-            fs.unlinkSync(req.file.path);
-
-        }
-        return res.status(500).json({ message: error.message })
-
+        console.error("analyzeResume error:", error);
+        return res.status(500).json({ message: error.message });
     }
 }
 
