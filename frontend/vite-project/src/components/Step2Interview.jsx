@@ -30,7 +30,6 @@ function Step2Interview({ interviewData, onFinish }) {
     const [finishing, setFinishing] = useState(false);
     const [timeTaken, setTimeTaken] = useState(0);
     const [voiceGender, setVoiceGender] = useState("male");
-    const [subtitle, setSubtitle] = useState("");
     const videoRef = useRef(null);
     const timerRef = useRef(null);
     const startTimeRef = useRef(Date.now());
@@ -86,6 +85,10 @@ function Step2Interview({ interviewData, onFinish }) {
                 window.speechSynthesis.resume();
             } catch (_) {}
 
+            isAiPlayingRef.current = true;
+            setIsAiPlaying(true);
+            stopMic();
+
             const humanText = text.replace(/,/g, ", ").replace(/\./g, ". ");
             const utterance = new SpeechSynthesisUtterance(humanText);
 
@@ -106,7 +109,6 @@ function Step2Interview({ interviewData, onFinish }) {
             const safeResolve = () => {
                 if (!hasResolved) {
                     hasResolved = true;
-                    setSubtitle("");
                     resolve();
                 }
             };
@@ -147,38 +149,27 @@ function Step2Interview({ interviewData, onFinish }) {
                 safeResolve();
             };
 
-            setSubtitle(text);
             window.speechSynthesis.speak(utterance);
         });
     };
 
-        useEffect(()=>{
-            if(!selectedVoice){ return;}
+    useEffect(() => {
+        if (!selectedVoice) { return; }
 
-            const runIntro=async()=>{
-                if(isIntroPhase){
-
-                    await speakText(`hi ${userName} , its great to meet you today i hope u are ready so lets start the interview `);
-
-                     await speakText(" i will ask you a few questions. just answer naturally and take a deep breath lets begin");
-                setIsIntroPhase(false)
-                }
-                else if(currentQuestion && isMicOn){
-                  await new Promise((r)=>setTimeout(r,800));
-                  if(currentIndex=== totalQuestions-1){
-                    await speakText(`Alright this might be a little bit challenging but i know u can do it   ${currentQuestion.question}`);
-                  }
-                  else{
-                    await speakText(`${currentQuestion.question}`);
-                  }
-                  if (isMicOnRef.current) startMic();
-                }
-
-               
+        const runIntro = async () => {
+            if (isIntroPhase) {
+                await speakText(`hi ${userName}, it's great to meet you today. Let's start the interview.`);
+                await speakText("I will ask you a few questions. Just answer naturally when you are ready.");
+                setIsIntroPhase(false);
+            } else if (currentQuestion) {
+                await new Promise((r) => setTimeout(r, 600));
+                await speakText(`${currentQuestion.question}`);
+                if (isMicOnRef.current) startMic();
             }
+        };
 
-            runIntro();
-        },[selectedVoice, isIntroPhase , currentIndex])
+        runIntro();
+    }, [selectedVoice, isIntroPhase, currentIndex]);
 
     // Reset timer when question changes — pauses while AI is speaking
     useEffect(() => {
@@ -232,21 +223,30 @@ function Step2Interview({ interviewData, onFinish }) {
             }
 
             if (finalTranscript) {
-                setAnswer(prev => {
-                    const newBase = prev ? (prev.trim() + ' ' + finalTranscript.trim()) : finalTranscript.trim();
-                    baseAnswerRef.current = newBase;
-                    return newBase;
-                });
-            } else if (interimTranscript) {
-                const base = baseAnswerRef.current ? baseAnswerRef.current.trim() : '';
-                setAnswer(base ? (base + ' ' + interimTranscript.trim()) : interimTranscript.trim());
+                const updatedBase = baseAnswerRef.current
+                    ? (baseAnswerRef.current.trim() + ' ' + finalTranscript.trim())
+                    : finalTranscript.trim();
+                baseAnswerRef.current = updatedBase;
             }
+
+            const currentBase = baseAnswerRef.current ? baseAnswerRef.current.trim() : '';
+            const fullText = interimTranscript
+                ? (currentBase ? currentBase + ' ' + interimTranscript.trim() : interimTranscript.trim())
+                : currentBase;
+
+            setAnswer(fullText);
         };
 
         // Auto-restart on silence if mic is enabled and AI isn't speaking
         recognition.onend = () => {
             if (isMicOnRef.current && !isAiPlayingRef.current && recognitionRef.current) {
-                try { recognitionRef.current.start(); } catch (_) {}
+                setTimeout(() => {
+                    try {
+                        if (isMicOnRef.current && !isAiPlayingRef.current && recognitionRef.current) {
+                            recognitionRef.current.start();
+                        }
+                    } catch (_) {}
+                }, 150);
             }
         };
 
@@ -259,6 +259,16 @@ function Step2Interview({ interviewData, onFinish }) {
         if (isMicOnRef.current && !isAiPlayingRef.current) {
             try { recognition.start(); } catch (_) {}
         }
+
+        return () => {
+            if (recognitionRef.current) {
+                recognitionRef.current.onend = null;
+                recognitionRef.current.onerror = null;
+                recognitionRef.current.onresult = null;
+                try { recognitionRef.current.stop(); } catch (_) {}
+                recognitionRef.current = null;
+            }
+        };
     }, []);
 
     const startMic = () => {
@@ -425,16 +435,6 @@ function Step2Interview({ interviewData, onFinish }) {
                             {currentQuestion?.question || 'Loading question...'}
                         </div>
                     </div>
-
-                    {/* subtitle */}
-
-                    {subtitle && (
-                        <div className='w-full max-w-md shadow-sm bg-gray-100 p-4 sm:p-6 mb-6 rounded-xl border border-gray-200'>
-                            
-                            <p className='text-gray-800 text-sm sm:text-base font-medium '>{subtitle}</p>
-                        </div> 
-                        
-                    )} 
 
                     {/* Answer Box */}
                     <textarea
