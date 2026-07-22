@@ -155,8 +155,8 @@ function Step2Interview({ interviewData, onFinish }) {
                 utterance.voice = maleVoice;
             }
 
-            utterance.rate = 0.82;     // Slow but natural
-            utterance.pitch = 0.7;     // Lowest practical pitch
+            utterance.rate = 1.5;     // Slow but natural
+            utterance.pitch = 1;     // Lowest practical pitch
             utterance.volume = 1.0;
 
             let settled = false;
