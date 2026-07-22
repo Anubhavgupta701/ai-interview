@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { motion } from 'motion/react';
 import axios from 'axios';
-import maleVideo from "../assets/videos/maleVideo.mp4";
+import maleVideo from "../assets/videos/malevideo.mp4";
 import Timer from "./Timer";
 import { FaMicrophone , FaMicrophoneSlash } from 'react-icons/fa';
 import { serverUrl } from '../config';
