@@ -66,35 +66,73 @@ function Step2Interview({ interviewData, onFinish }) {
         }
     }, []);
 
+    // Helper to deduplicate repeating trailing words/phrases from speech recognition
+    const appendDeduplicated = (existing, addition) => {
+        const e = (existing || '').trim();
+        const a = (addition || '').trim();
+        if (!a) return e;
+        if (!e) return a;
+
+        if (e.toLowerCase().endsWith(a.toLowerCase())) {
+            return e;
+        }
+
+        const eWords = e.split(/\s+/);
+        const aWords = a.split(/\s+/);
+
+        let overlap = 0;
+        const maxCheck = Math.min(eWords.length, aWords.length);
+        for (let len = maxCheck; len > 0; len--) {
+            const eTail = eWords.slice(-len).join(' ').toLowerCase();
+            const aHead = aWords.slice(0, len).join(' ').toLowerCase();
+            if (eTail === aHead) {
+                overlap = len;
+                break;
+            }
+        }
+
+        if (overlap > 0) {
+            const nonOverlappingAddition = aWords.slice(overlap).join(' ');
+            return nonOverlappingAddition ? `${e} ${nonOverlappingAddition}` : e;
+        }
+
+        return `${e} ${a}`;
+    };
+
+    // Dynamically find the best male voice
+    const getBestMaleVoice = () => {
+        if (typeof window === 'undefined' || !window.speechSynthesis) return null;
+        const voices = window.speechSynthesis.getVoices();
+        if (!voices || voices.length === 0) return null;
+
+        const explicitMale = voices.find(v =>
+            /\b(david|mark|george|james|richard|guy|stefan|male)\b/i.test(v.name) ||
+            /microsoft.*(david|mark|george|male)/i.test(v.name)
+        );
+        if (explicitMale) return explicitMale;
+
+        const nonFemaleEn = voices.find(v =>
+            v.lang.startsWith('en') &&
+            !/zira|sara|hazel|helen|victoria|karen|samantha|catherine|lisa|eva|fiona|female|google us english/i.test(v.name)
+        );
+        return nonFemaleEn || voices.find(v => !/zira|sara|hazel|female|samantha/i.test(v.name)) || voices[0];
+    };
+
     useEffect(() => {
         const load = () => {
-            const voices = window.speechSynthesis?.getVoices() ?? [];
-            // Prefer explicitly male voices — do NOT include 'Google US English' (it's female)
-            const male = voices.find(v =>
-                /\bdavid\b/i.test(v.name) ||
-                /\bmark\b/i.test(v.name) ||
-                /microsoft.*male/i.test(v.name)
-            ) || voices.find(v =>
-                /\bmale\b/i.test(v.name)
-            ) || voices.find(v =>
-                // last resort: any English US voice that is NOT known-female
-                /en.*US/i.test(v.lang) &&
-                !/zira|sara|hazel|female|helen|victoria|female|karen|samantha|google us english/i.test(v.name)
-            );
-            const female = voices.find(v =>
-                /zira|sara|female|google uk english|hazel/i.test(v.name)
-            );
-            const voice = {
-                male: male?.name || null,
-                female: female?.name || voices[0]?.name || null,
-            };
-            setSelectedVoice(voice);
-            selectedVoiceRef.current = voice;
+            if (window.speechSynthesis) {
+                const maleVoice = getBestMaleVoice();
+                setSelectedVoice(maleVoice?.name || 'default');
+                selectedVoiceRef.current = maleVoice;
+            }
         };
         load();
-        if (window.speechSynthesis) window.speechSynthesis.onvoiceschanged = load;
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+            window.speechSynthesis.onvoiceschanged = load;
+        }
     }, []);
 
+    //speak function
     const speakText = useCallback((text) => {
         return new Promise((resolve) => {
             if (!window.speechSynthesis) { resolve(); return; }
@@ -108,15 +146,13 @@ function Step2Interview({ interviewData, onFinish }) {
                 text.replace(/,/g, ', ').replace(/\./g, '. ')
             );
 
-            const sv = selectedVoiceRef.current;
-            if (sv) {
-                const voiceName = voiceGender === 'male' ? sv.male : sv.female;
-                const found = window.speechSynthesis.getVoices().find(v => v.name === voiceName);
-                if (found) utterance.voice = found;
+            const maleVoice = getBestMaleVoice();
+            if (maleVoice) {
+                utterance.voice = maleVoice;
             }
 
             utterance.rate = 0.85;
-            utterance.pitch = 0.9;
+            utterance.pitch = 0.8; // Masculine lower pitch
             utterance.volume = 1;
 
             let settled = false;
@@ -136,44 +172,40 @@ function Step2Interview({ interviewData, onFinish }) {
                 clearTimeout(tid);
                 if (videoRef.current) { videoRef.current.pause(); videoRef.current.currentTime = 0; }
                 startTimeRef.current = Date.now();
-                // Wait 1500ms before restarting mic so TTS audio fully clears
-                // from the microphone — prevents AI speech from being transcribed
-                // as the user's answer
-                setTimeout(done, 1500);
+                // Wait 1200ms for speaker audio to dissipate before opening mic
+                setTimeout(done, 1200);
             };
             utterance.onerror = () => { clearTimeout(tid); done(); };
 
             window.speechSynthesis.speak(utterance);
         });
-    }, [stopMic, startMic, voiceGender]);
+    }, [stopMic, startMic]);
 
     useEffect(() => {
-        if (!selectedVoice) return;
-        let cancelled = false;
-        const run = async () => {
-            if (isIntroPhase) {
-                await speakText(`Hi ${userName}, great to meet you! Let us start the interview.`);
-                await speakText("I will ask you a few questions. Just answer naturally when you are ready.");
-                if (!cancelled) setIsIntroPhase(false);
-            } else if (currentQuestion) {
-                await new Promise(r => setTimeout(r, 400));
-                if (!cancelled) await speakText(currentQuestion.question);
-                if (!cancelled && isMicOnRef.current) startMic();
-            }
-        };
-        run();
-        return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [selectedVoice, isIntroPhase, currentIndex]);
+        if (isIntroPhase || currentQuestion) {
+            let cancelled = false;
+            const run = async () => {
+                if (isIntroPhase) {
+                    await speakText(`Hi ${userName || 'Candidate'}, great to meet you! Let us start the interview.`);
+                    await speakText("I will ask you a few questions. Just answer naturally when you are ready.");
+                    if (!cancelled) setIsIntroPhase(false);
+                } else if (currentQuestion) {
+                    await new Promise(r => setTimeout(r, 400));
+                    if (!cancelled) await speakText(currentQuestion.question);
+                    if (!cancelled && isMicOnRef.current) startMic();
+                }
+            };
+            run();
+            return () => { cancelled = true; };
+        }
+    }, [isIntroPhase, currentIndex, speakText, startMic, currentQuestion, userName]);
 
     useEffect(() => {
         const limit = questions[currentIndex]?.timeLimit || 60;
         setTimeLeft(limit);
         setAnswer('');
         answerRef.current = '';
-        finalTranscriptRef.current = '';   // reset for new question
-        sessionFinalRef.current = '';      // reset session too
-        baseForSessionRef.current = '';    // reset session base
+        baseForSessionRef.current = '';
         setFeedback('');
         setAnswered(false);
 
@@ -186,7 +218,7 @@ function Step2Interview({ interviewData, onFinish }) {
             });
         }, 1000);
         return () => clearInterval(timerRef.current);
-    }, [currentIndex]);
+    }, [currentIndex, questions]);
 
     useEffect(() => {
         const SR = window.SpeechRecognition || window.webkitSpeechRecognition;
@@ -202,41 +234,31 @@ function Step2Interview({ interviewData, onFinish }) {
         rec.maxAlternatives = 1;
 
         rec.onstart = () => {
-            // Snapshot the current confirmed answer as the base for this session.
-            // This ensures each session only ADDS new words on top of what's already there.
             baseForSessionRef.current = answerRef.current.trim();
-            sessionFinalRef.current = '';
             isListeningRef.current = true;
             setIsListening(true);
             setMicError('');
         };
 
         rec.onresult = (event) => {
-            /*
-             * event.results resets each time rec.start() is called.
-             * Loop from i=0 to rebuild all finals for THIS session.
-             * baseForSessionRef holds the confirmed text from BEFORE this session.
-             * Display = base + sessionFinals + live interim
-             */
             let sessionFinals = '';
             let interim = '';
 
             for (let i = 0; i < event.results.length; i++) {
                 const t = event.results[i][0].transcript;
                 if (event.results[i].isFinal) {
-                    sessionFinals += (sessionFinals ? ' ' : '') + t.trim();
+                    sessionFinals = appendDeduplicated(sessionFinals, t);
                 } else {
                     interim = t.trim();
                 }
             }
 
-            sessionFinalRef.current = sessionFinals;
+            const currentBase = baseForSessionRef.current ? baseForSessionRef.current.trim() : '';
+            const confirmedText = appendDeduplicated(currentBase, sessionFinals);
 
-            const base = baseForSessionRef.current;
-            const confirmed = [base, sessionFinals].filter(Boolean).join(' ');
             const display = interim
-                ? (confirmed ? confirmed + ' ' + interim : interim)
-                : confirmed;
+                ? (confirmedText ? `${confirmedText} ${interim}` : interim)
+                : confirmedText;
 
             answerRef.current = display;
             setAnswer(display);
@@ -245,21 +267,22 @@ function Step2Interview({ interviewData, onFinish }) {
         rec.onend = () => {
             isListeningRef.current = false;
             setIsListening(false);
-            sessionFinalRef.current = '';
 
-            // Auto-restart — wait 800ms so residual audio from the room clears
+            if (answerRef.current) {
+                baseForSessionRef.current = answerRef.current.trim();
+            }
+
             if (isMicOnRef.current && !isAiPlayingRef.current) {
                 setTimeout(() => {
                     if (isMicOnRef.current && !isAiPlayingRef.current && !isListeningRef.current) {
                         try { rec.start(); } catch (_) {}
                     }
-                }, 800);
+                }, 600);
             }
         };
 
         rec.onerror = (e) => {
-            if (e.error === 'no-speech') return;   // normal — onend handles restart
-            if (e.error === 'aborted') return;      // we stopped it intentionally
+            if (e.error === 'no-speech' || e.error === 'aborted') return;
             isListeningRef.current = false;
             setIsListening(false);
             if (e.error === 'not-allowed' || e.error === 'service-not-allowed') {
@@ -273,7 +296,6 @@ function Step2Interview({ interviewData, onFinish }) {
 
         recognitionRef.current = rec;
 
-        // Delay initial start to avoid clashing with the AI intro TTS
         const kickoff = setTimeout(() => {
             if (isMicOnRef.current && !isAiPlayingRef.current) startMic();
         }, 1000);
@@ -287,11 +309,9 @@ function Step2Interview({ interviewData, onFinish }) {
             try { rec.stop(); } catch (_) {}
             recognitionRef.current = null;
             isListeningRef.current = false;
-            sessionFinalRef.current = '';
             setIsListening(false);
         };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, []);
+    }, [startMic]);
 
     const toggleMic = useCallback(() => {
         if (isMicOnRef.current) {
