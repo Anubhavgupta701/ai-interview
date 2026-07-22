@@ -106,8 +106,9 @@ function Step2Interview({ interviewData, onFinish }) {
         if (!voices || voices.length === 0) return null;
 
         const explicitMale = voices.find(v =>
-            /\b(david|mark|george|james|richard|guy|stefan|male)\b/i.test(v.name) ||
-            /microsoft.*(david|mark|george|male)/i.test(v.name)
+            /\b(david|mark|george|james|richard|guy|stefan|daniel|alex|fred|male)\b/i.test(v.name) ||
+            /microsoft.*(david|mark|george|male)/i.test(v.name) ||
+            /google.*male/i.test(v.name)
         );
         if (explicitMale) return explicitMale;
 
@@ -132,6 +133,9 @@ function Step2Interview({ interviewData, onFinish }) {
         }
     }, []);
 
+    // Only maleVideo is imported; use it as fallback for both genders
+    const videoSource = maleVideo;
+
     //speak function
     const speakText = useCallback((text) => {
         return new Promise((resolve) => {
@@ -151,8 +155,8 @@ function Step2Interview({ interviewData, onFinish }) {
                 utterance.voice = maleVoice;
             }
 
-            utterance.rate = 0.85;
-            utterance.pitch = 0.8; // Masculine lower pitch
+            utterance.rate = 0.78; // Measured, steady, confident heavy pace
+            utterance.pitch = 0.5; // Deep, bass-heavy sigma masculine voice
             utterance.volume = 1;
 
             let settled = false;
