@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+﻿import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { motion } from 'motion/react';
 import axios from 'axios';
 import maleVideo from "../assets/videos/malevideo.mp4";
@@ -46,7 +46,7 @@ function Step2Interview({ interviewData, onFinish }) {
 
     const stopMic = useCallback(() => {
         if (!recognitionRef.current) return;
-        try { recognitionRef.current.stop(); } catch (_) {}
+        try { recognitionRef.current.stop(); } catch (_) { }
         isListeningRef.current = false;
         setIsListening(false);
     }, []);
@@ -140,7 +140,7 @@ function Step2Interview({ interviewData, onFinish }) {
     const speakText = useCallback((text) => {
         return new Promise((resolve) => {
             if (!window.speechSynthesis) { resolve(); return; }
-            try { window.speechSynthesis.cancel(); } catch (_) {}
+            try { window.speechSynthesis.cancel(); } catch (_) { }
 
             isAiPlayingRef.current = true;
             setIsAiPlaying(true);
@@ -155,9 +155,9 @@ function Step2Interview({ interviewData, onFinish }) {
                 utterance.voice = maleVoice;
             }
 
-            utterance.rate = 0.72; // Slow, powerful, dominant pace
-            utterance.pitch = 0.1; // Absolute minimum pitch floor for deepest alpha male voice
-            utterance.volume = 1;
+            utterance.rate = 0.82;     // Slow but natural
+            utterance.pitch = 0.7;     // Lowest practical pitch
+            utterance.volume = 1.0;
 
             let settled = false;
             const done = () => {
@@ -171,7 +171,7 @@ function Step2Interview({ interviewData, onFinish }) {
 
             const tid = setTimeout(done, Math.max(8000, text.length * 120));
 
-            utterance.onstart = () => { videoRef.current?.play().catch(() => {}); };
+            utterance.onstart = () => { videoRef.current?.play().catch(() => { }); };
             utterance.onend = () => {
                 clearTimeout(tid);
                 if (videoRef.current) { videoRef.current.pause(); videoRef.current.currentTime = 0; }
@@ -279,7 +279,7 @@ function Step2Interview({ interviewData, onFinish }) {
             if (isMicOnRef.current && !isAiPlayingRef.current) {
                 setTimeout(() => {
                     if (isMicOnRef.current && !isAiPlayingRef.current && !isListeningRef.current) {
-                        try { rec.start(); } catch (_) {}
+                        try { rec.start(); } catch (_) { }
                     }
                 }, 600);
             }
@@ -310,7 +310,7 @@ function Step2Interview({ interviewData, onFinish }) {
             rec.onresult = null;
             rec.onend = null;
             rec.onerror = null;
-            try { rec.stop(); } catch (_) {}
+            try { rec.stop(); } catch (_) { }
             recognitionRef.current = null;
             isListeningRef.current = false;
             setIsListening(false);
@@ -412,11 +412,10 @@ function Step2Interview({ interviewData, onFinish }) {
                             </div>
                         </div>
                         <div className='flex justify-center'>
-                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${
-                                currentQuestion?.difficulty === 'easy' ? 'bg-green-100 text-green-700' :
-                                currentQuestion?.difficulty === 'medium' ? 'bg-yellow-100 text-yellow-700' :
-                                'bg-red-100 text-red-700'
-                            }`}>
+                            <span className={`px-3 py-1 rounded-full text-xs font-semibold ${currentQuestion?.difficulty === 'easy' ? 'bg-green-100 text-green-700' :
+                                    currentQuestion?.difficulty === 'medium' ? 'bg-yellow-100 text-yellow-700' :
+                                        'bg-red-100 text-red-700'
+                                }`}>
                                 {currentQuestion?.difficulty?.toUpperCase() || 'MEDIUM'}
                             </span>
                         </div>
@@ -510,9 +509,8 @@ function Step2Interview({ interviewData, onFinish }) {
                             type='button'
                             onClick={toggleMic}
                             whileTap={{ scale: 0.9 }}
-                            className={`w-12 h-12 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center rounded-full text-white shadow-lg transition-all ${
-                                isMicOn ? 'bg-red-600 hover:bg-red-500 animate-pulse' : 'bg-gray-700 hover:bg-gray-600'
-                            }`}
+                            className={`w-12 h-12 sm:w-14 sm:h-14 flex-shrink-0 flex items-center justify-center rounded-full text-white shadow-lg transition-all ${isMicOn ? 'bg-red-600 hover:bg-red-500 animate-pulse' : 'bg-gray-700 hover:bg-gray-600'
+                                }`}
                             title={isMicOn ? 'Mute Microphone' : 'Unmute Microphone'}
                         >
                             {isMicOn ? <FaMicrophone size={20} /> : <FaMicrophoneSlash size={20} />}
