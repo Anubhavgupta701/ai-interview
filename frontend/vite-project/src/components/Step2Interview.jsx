@@ -42,9 +42,8 @@ function Step2Interview({ interviewData, onFinish }) {
 
     useEffect(() => {
         const loadVoices = () => {
-            const voices = window.speechSynthesis.getVoices();
-            if (!voices.length) return;
-
+            const voices = (typeof window !== 'undefined' && window.speechSynthesis) ? window.speechSynthesis.getVoices() : [];
+            
             const maleVoice = voices.find(v =>
                 v.name.toLowerCase().includes('male') ||
                 v.name.toLowerCase().includes('david') ||
@@ -60,13 +59,15 @@ function Step2Interview({ interviewData, onFinish }) {
             );
 
             setSelectedVoice({
-                male: maleVoice?.name || 'Google US English',
-                female: femaleVoice?.name || 'Google UK English'
+                male: maleVoice?.name || voices[0]?.name || 'default',
+                female: femaleVoice?.name || voices[0]?.name || 'default'
             });
             setVoiceGender('male');
         };
         loadVoices();
-        window.speechSynthesis.onvoiceschanged = loadVoices;
+        if (typeof window !== 'undefined' && window.speechSynthesis) {
+            window.speechSynthesis.onvoiceschanged = loadVoices;
+        }
     }, []);
 
     // Only maleVideo is imported; use it as fallback for both genders
@@ -75,59 +76,78 @@ function Step2Interview({ interviewData, onFinish }) {
     //speak function
     const speakText = (text) => {
         return new Promise((resolve) => {
-            if (!window.speechSynthesis || !selectedVoice) {
+            if (typeof window === 'undefined' || !window.speechSynthesis) {
                 resolve();
                 return;
             }
 
-            window.speechSynthesis.cancel();
+            try {
+                window.speechSynthesis.cancel();
+                window.speechSynthesis.resume();
+            } catch (_) {}
 
-            const humanText = text.replace(/,/g, ", ...").replace(/\./g, "...");
-
+            const humanText = text.replace(/,/g, ", ").replace(/\./g, ". ");
             const utterance = new SpeechSynthesisUtterance(humanText);
 
-            // Look up the actual SpeechSynthesisVoice object by name
-            const voiceName = voiceGender === 'male' ? selectedVoice.male : selectedVoice.female;
-            const voices = window.speechSynthesis.getVoices();
-            const foundVoice = voices.find(v => v.name === voiceName);
-            if (foundVoice) {
-                utterance.voice = foundVoice;
+            if (selectedVoice) {
+                const voiceName = voiceGender === 'male' ? selectedVoice.male : selectedVoice.female;
+                const voices = window.speechSynthesis.getVoices();
+                const foundVoice = voices.find(v => v.name === voiceName);
+                if (foundVoice) {
+                    utterance.voice = foundVoice;
+                }
             }
 
-            utterance.rate = 0.80;
-            utterance.pitch = 0.50;
+            utterance.rate = 0.85;
+            utterance.pitch = 0.9;
             utterance.volume = 1;
+
+            let hasResolved = false;
+            const safeResolve = () => {
+                if (!hasResolved) {
+                    hasResolved = true;
+                    setSubtitle("");
+                    resolve();
+                }
+            };
+
+            const timeoutId = setTimeout(() => {
+                isAiPlayingRef.current = false;
+                setIsAiPlaying(false);
+                if (isMicOnRef.current) startMic();
+                safeResolve();
+            }, Math.max(7000, text.length * 130));
 
             utterance.onstart = () => {
                 isAiPlayingRef.current = true;
                 setIsAiPlaying(true);
                 stopMic();
-                videoRef.current?.play();
+                videoRef.current?.play().catch(() => {});
             };
 
             utterance.onend = () => {
-                videoRef.current?.pause();
-                if (videoRef.current) videoRef.current.currentTime = 0;
+                clearTimeout(timeoutId);
+                if (videoRef.current) {
+                    videoRef.current.pause();
+                    videoRef.current.currentTime = 0;
+                }
                 isAiPlayingRef.current = false;
                 setIsAiPlaying(false);
 
                 if (isMicOnRef.current) startMic();
-                // Start measuring answer time AFTER AI finishes speaking
                 startTimeRef.current = Date.now();
-                setTimeout(() => {
-                    setSubtitle("");
-                    resolve();
-                }, 300);
+                setTimeout(safeResolve, 200);
             };
 
-            utterance.onerror = () => {
+            utterance.onerror = (err) => {
+                clearTimeout(timeoutId);
                 isAiPlayingRef.current = false;
                 setIsAiPlaying(false);
                 if (isMicOnRef.current) startMic();
-                setSubtitle("");
-                resolve();
+                safeResolve();
             };
 
+            setSubtitle(text);
             window.speechSynthesis.speak(utterance);
         });
     };
@@ -231,6 +251,7 @@ function Step2Interview({ interviewData, onFinish }) {
         };
 
         recognition.onerror = (e) => {
+            if (e.error === 'aborted' || e.error === 'no-speech') return;
             console.error('Speech recognition error:', e.error);
         };
 
@@ -386,9 +407,20 @@ function Step2Interview({ interviewData, onFinish }) {
 
                     {/* Question Box */}
                     <div className='relative mb-6 bg-gray-50 p-4 sm:p-6 rounded-2xl border border-gray-200 shadow-sm'>
-                        <p className='text-gray-500 mb-2 text-sm'>
-                            Question {currentIndex + 1} of {totalQuestions}
-                        </p>
+                        <div className='flex justify-between items-center mb-2'>
+                            <p className='text-gray-500 text-sm'>
+                                Question {currentIndex + 1} of {totalQuestions}
+                            </p>
+                            {currentQuestion?.question && (
+                                <button
+                                    type="button"
+                                    onClick={() => speakText(currentQuestion.question)}
+                                    className='text-xs bg-emerald-100 hover:bg-emerald-200 text-emerald-800 px-3 py-1 rounded-full font-medium transition flex items-center gap-1 cursor-pointer'
+                                >
+                                    🔊 Read Aloud
+                                </button>
+                            )}
+                        </div>
                         <div className='text-base sm:text-lg font-semibold text-gray-800 leading-relaxed'>
                             {currentQuestion?.question || 'Loading question...'}
                         </div>

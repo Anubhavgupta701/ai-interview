@@ -66,6 +66,10 @@ function Step1Setup({ onStart }) {
     const handleStart = async () => {
         setLoading(true);
         try {
+            if (typeof window !== 'undefined' && window.speechSynthesis) {
+                window.speechSynthesis.cancel();
+                window.speechSynthesis.resume();
+            }
             const apiUrl = serverUrl ? `${serverUrl}/api/interview/generate-questions` : "/api/interview/generate-questions";
             const result = await axios.post(apiUrl, { role, experience, mode, resumeText, projects, skills }, { withCredentials: true });
             console.log(result.data);
